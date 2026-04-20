@@ -152,7 +152,7 @@ const SLEEP_BETWEEN_TESTS = 2;
 foreach ($providers as $entry) {
     $name = $entry['name'];
     $prov = $entry['provider'];
-    
+
     echo '<hr style="margin: 4rem 0;">';
     echo "<h2>🤖 PROVEEDOR: {$name}</h2>";
 

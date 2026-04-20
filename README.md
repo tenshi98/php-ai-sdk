@@ -98,8 +98,7 @@ ai-sdk/
 │
 ├── ejemplos/                         # Archivos de ejemplo
 │   ├── example.php                   # Ejemplo completo ejecutable
-│   ├── quickstart.php                # Código inicial rápido
-│   └── scratch_test.php              # Pruebas de integración
+│   └── quickstart.php                # Código inicial rápido
 │
 └── src/
     ├── AIClient.php                  # Facade principal
