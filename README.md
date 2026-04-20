@@ -4,7 +4,7 @@
 > Sin dependencias externas. Sin Composer. Compatible con PHP 8.0+.
 
 [![PHP Version](https://img.shields.io/badge/PHP-8.0+-blue.svg)](https://php.net)
-[![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
+[![License](https://img.shields.io/badge/License-GPLv3-blue.svg)](LICENSE)
 [![No Dependencies](https://img.shields.io/badge/dependencies-none-brightgreen.svg)](#)
 
 ---
