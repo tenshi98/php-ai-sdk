@@ -1,0 +1,15 @@
+{
+    "intelephense.environment.includePaths": [],
+    "intelephense.files.exclude": [
+        "**/.git/**",
+        "**/node_modules/**",
+        "**/vendor/**",
+        "**/revisar/**"
+    ],
+    "files.exclude": {
+        "revisar": false
+    },
+    "search.exclude": {
+        "**/revisar/**": false
+    }
+}
