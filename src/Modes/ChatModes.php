@@ -42,6 +42,9 @@ final class ChatModes
     /** Modo para generación de tablas y/o gráficos HTML desde datos. */
     public const MODE_GENERADOR_TABLAS_GRAFICOS = 'generador_tablas_graficos';
 
+    /** Modo para generación de queries SQL con salida estructurada en JSON. */
+    public const MODE_GENERADOR_QUERIES_ESTRUCTURADAS = 'generador_queries_estructuradas';
+
     // Nuevos modos implementados
     public const MODE_RESUMIDOR = 'resumidor';
     public const MODE_EXTRACTOR_DATOS = 'extractor_datos';
@@ -143,6 +146,37 @@ REGLAS ESTRICTAS:
 
 FORMATO DE RESPUESTA:
 Devuelve solo el SQL listo para ejecutar. Sin ningún texto adicional.
+PROMPT;
+
+    /**
+     * System prompt BASE para el modo generador_queries_estructuradas (sin esquema).
+     */
+    private const PROMPT_GENERADOR_QUERIES_ESTRUCTURADAS = <<<'PROMPT'
+Eres un experto en bases de datos relacionales y en la escritura de queries SQL de alto rendimiento.
+Tu función es interpretar consultas en lenguaje natural y responder ESTRICTAMENTE con un objeto JSON.
+
+El usuario te proporcionará el esquema de la base de datos UNA SOLA VEZ al inicio de la sesión.
+A partir de ese momento, solo recibirás consultas en lenguaje natural y deberás generar el SQL correspondiente utilizando el esquema ya cargado.
+
+REGLAS ESTRICTAS:
+- SEGURIDAD: Solo puedes generar consultas de solo lectura (SELECT). NUNCA generes consultas destructivas o de modificación (INSERT, UPDATE, DELETE, DROP, ALTER, TRUNCATE).
+- El formato de salida DEBE ser exclusivamente JSON válido. No agregues texto adicional, markdown, ni bloques de código (```json ... ```).
+- El JSON debe tener exactamente la siguiente estructura:
+{
+    "tipo": [entero de 0 a 4],
+    "query": "[string con query sql válida o vacío]",
+    "respuesta": "[string con texto de respuesta]"
+}
+
+EXPLICACIÓN DEL FORMATO DE SALIDA:
+- "tipo": indica el tipo de respuesta que se debe entregar, existen los siguientes:
+    0: respuesta simple, no genera una query
+    1: respuesta para generar una tabla
+    2: respuesta para generar un grafico
+    3: respuesta para generar tabla y grafico
+    4: respuesta inesperada
+- "query": si la pregunta corresponde a la generación de una query, este campo debe contener una consulta SQL válida (si no hay query, dejar vacío).
+- "respuesta": respuesta probable si existe una query válida que entregue resultados, o el texto de la respuesta simple/inesperada.
 PROMPT;
 
     private const PROMPT_GENERADOR_TABLAS_GRAFICOS = <<<'PROMPT'
@@ -388,6 +422,90 @@ PROMPT;
     }
 
     /**
+     * Construye el array de mensajes inicial de una sesión generador_queries_estructuradas.
+     *
+     * @param string $databaseSchema       Esquema de la base de datos.
+     * @param string $naturalLanguageQuery Primera consulta en lenguaje natural.
+     *
+     * @return array Array de mensajes completo listo para enviar al proveedor.
+     *
+     * @throws InvalidArgumentException Si el esquema o la consulta están vacíos.
+     */
+    public function buildQueryEstructuradaSessionInit(string $databaseSchema, string $naturalLanguageQuery): array
+    {
+        if (trim($databaseSchema) === '') {
+            throw new InvalidArgumentException(
+                'ChatModes[generador_queries_estructuradas]: El esquema de la base de datos no puede estar vacío.'
+            );
+        }
+
+        if (trim($naturalLanguageQuery) === '') {
+            throw new InvalidArgumentException(
+                'ChatModes[generador_queries_estructuradas]: La consulta en lenguaje natural no puede estar vacía.'
+            );
+        }
+
+        $firstUserMessage = sprintf(
+            "ESQUEMA DE BASE DE DATOS (solo se envía esta vez):\n%s\n\n" .
+            "PRIMERA CONSULTA:\n%s",
+            trim($databaseSchema),
+            trim($naturalLanguageQuery)
+        );
+
+        return [
+            [
+                'role'    => 'system',
+                'content' => self::PROMPT_GENERADOR_QUERIES_ESTRUCTURADAS,
+            ],
+            [
+                'role'    => 'user',
+                'content' => $firstUserMessage,
+            ],
+        ];
+    }
+
+    /**
+     * Construye el array de mensajes para una consulta de seguimiento en la misma sesión (estructurada).
+     *
+     * @param array $sessionHistory Historial acumulado de la sesión.
+     * @param string $naturalLanguageQuery Nueva consulta en lenguaje natural.
+     *
+     * @return array Array completo con [system] + [historial] + [nueva consulta].
+     *
+     * @throws InvalidArgumentException Si el historial está vacío o la consulta está vacía.
+     */
+    public function buildQueryEstructuradaFollowUp(array $sessionHistory, string $naturalLanguageQuery): array
+    {
+        if (empty($sessionHistory)) {
+            throw new InvalidArgumentException(
+                'ChatModes[generador_queries_estructuradas]: El historial de sesión no puede estar vacío.'
+            );
+        }
+
+        if (trim($naturalLanguageQuery) === '') {
+            throw new InvalidArgumentException(
+                'ChatModes[generador_queries_estructuradas]: La consulta en lenguaje natural no puede estar vacía.'
+            );
+        }
+
+        return array_merge(
+            [
+                [
+                    'role'    => 'system',
+                    'content' => self::PROMPT_GENERADOR_QUERIES_ESTRUCTURADAS,
+                ],
+            ],
+            $sessionHistory,
+            [
+                [
+                    'role'    => 'user',
+                    'content' => trim($naturalLanguageQuery),
+                ],
+            ]
+        );
+    }
+
+    /**
      * Construye el array de mensajes para el modo generador_tablas_graficos.
      *
      * @param array|string $data       Datos a visualizar. Puede ser:
@@ -566,6 +684,7 @@ PROMPT;
             self::MODE_CHAT_GENERAL,
             self::MODE_GENERADOR_QUERIES,
             self::MODE_GENERADOR_TABLAS_GRAFICOS,
+            self::MODE_GENERADOR_QUERIES_ESTRUCTURADAS,
             self::MODE_RESUMIDOR,
             self::MODE_EXTRACTOR_DATOS,
             self::MODE_REDACTOR_EMAIL,
