@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador SQL (Consultas Aisladas)</title>
+    <!-- Usando Pico CSS para diseño minimalista y elegante -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        .chat-container { 
+            height: 450px; 
+            overflow-y: auto; 
+            border: 1px solid #333; 
+            padding: 1.5rem; 
+            margin-bottom: 1.5rem; 
+            border-radius: 8px; 
+            background: #111; 
+        }
+        .msg { 
+            margin-bottom: 1rem; 
+            padding: 1rem; 
+            border-radius: 8px; 
+            clear: both;
+            line-height: 1.5;
+        }
+        .msg.user { 
+            background: #01768a; 
+            color: white; 
+            float: right; 
+            max-width: 80%; 
+        }
+        .msg.bot { 
+            background: #222; 
+            color: #ddd; 
+            float: left; 
+            max-width: 80%; 
+            border: 1px solid #444; 
+        }
+        .json-block { 
+            background: #000; 
+            padding: 1rem; 
+            border-radius: 5px; 
+            overflow-x: auto; 
+            font-family: monospace; 
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+            color: #4af626; /* Color terminal para el SQL/JSON */
+        }
+        .clearfix::after { 
+            content: ""; 
+            display: table; 
+            clear: both; 
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <header style="margin-bottom: 2rem;">
+            <h2>🛠️ Generador de Queries SQL (Aisladas)</h2>
+            <p>Ejemplo implementando la <strong>Solución 1</strong>: Cada consulta es independiente (sin historial) para ahorrar tokens y evitar que el costo crezca como bola de nieve. Además se muestra un ejemplo de esquema minificado.</p>
+        </header>
+
+        <div class="grid">
+            <!-- Columna Izquierda: Esquema y Controles -->
+            <div>
+                <h4>1. Esquema Minificado</h4>
+                <p><small>Este esquema se envía completo en CADA consulta, por lo que usar formato resumido ahorra muchos tokens.</small></p>
+                <textarea id="schema-input" rows="8" style="font-family: monospace;" placeholder="tabla(id, nombre...)"></textarea>
+                
+                <button id="reset-btn" class="secondary outline" style="margin-top: 1rem;">🗑️ Limpiar Pantalla</button>
+            </div>
+
+            <!-- Columna Derecha: Chat y Resultados -->
+            <div>
+                <h4>2. Consultas Aisladas</h4>
+                
+                <div id="chat-box" class="chat-container clearfix">
+                    <div class="msg bot">
+                        <strong>Sistema:</strong><br>
+                        ¡Hola! Cada pregunta que hagas a continuación se procesará de forma independiente sin recordar las anteriores.
+                    </div>
+                </div>
+                
+                <form id="chat-form">
+                    <fieldset role="group">
+                        <input type="text" id="query-input" placeholder="Ej: Dime el total de pedidos..." required autocomplete="off">
+                        <button type="submit" id="submit-btn" aria-busy="false">Generar SQL</button>
+                    </fieldset>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // REFERENCIAS DOM
+        const chatBox = document.getElementById('chat-box');
+        const chatForm = document.getElementById('chat-form');
+        const queryInput = document.getElementById('query-input');
+        const schemaInput = document.getElementById('schema-input');
+        const submitBtn = document.getElementById('submit-btn');
+        const resetBtn = document.getElementById('reset-btn');
+
+        // VALOR POR DEFECTO DEL ESQUEMA (MINIFICADO)
+        const defaultSchema = `usuarios (id, nombre, email, fecha_registro)
+pedidos (id, usuario_id, total, fecha_pedido)`;
+        schemaInput.value = defaultSchema;
+
+        // FUNCIÓN: Añadir mensaje al chat UI
+        function appendMessage(role, text, json = null) {
+            const div = document.createElement('div');
+            div.className = `msg ${role} clearfix`;
+            
+            let content = `<strong>${role === 'user' ? 'Tú' : 'IA'}:</strong><br>${text}`;
+            
+            if (json) {
+                let jsonStr = typeof json === 'string' ? json : JSON.stringify(json, null, 2);
+                content += `<pre class="json-block">${jsonStr}</pre>`;
+            }
+            
+            div.innerHTML = content;
+            chatBox.appendChild(div);
+            // Auto scroll hacia abajo
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // EVENTO: Limpiar pantalla
+        resetBtn.addEventListener('click', () => {
+            chatBox.innerHTML = `
+                <div class="msg bot clearfix">
+                    <strong>Sistema:</strong><br>
+                    Pantalla limpia. ¡Escribe una nueva pregunta!
+                </div>`;
+        });
+
+        // EVENTO: Enviar Formulario
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            // Mostrar el mensaje del usuario
+            appendMessage('user', query);
+            queryInput.value = '';
+            
+            // Estado de carga UI
+            submitBtn.setAttribute('aria-busy', 'true');
+            submitBtn.disabled = true;
+            
+            // Construir el cuerpo de la petición (payload)
+            // IMPORTANTE: Historial vacío y siempre se manda el esquema actual
+            const payload = {
+                pregunta: query,
+                esquema: schemaInput.value.trim(),
+                historial: [] 
+            };
+
+            try {
+                // Llamar al backend PHP
+                const response = await fetch('api.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    appendMessage('bot', 'Aquí tienes la estructura generada:', result.data);
+                    // NO acumulamos historial
+                } else {
+                    appendMessage('bot', `❌ Error: ${result.error || 'Respuesta inválida del servidor'}`);
+                }
+            } catch (error) {
+                appendMessage('bot', `❌ Error de conexión: ${error.message}`);
+            } finally {
+                // Restaurar estado UI
+                submitBtn.setAttribute('aria-busy', 'false');
+                submitBtn.disabled = false;
+                queryInput.focus();
+            }
+        });
+    </script>
+</body>
+</html>

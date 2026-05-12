@@ -162,6 +162,7 @@ final class ClaudeProvider implements AIProviderInterface
         $headers = [
             'x-api-key'         => $this->apiKey,
             'anthropic-version' => self::API_VERSION,
+            'anthropic-beta'    => 'prompt-caching-2024-07-31', // Activar prompt caching
         ];
 
         $body = [
@@ -253,9 +254,20 @@ final class ClaudeProvider implements AIProviderInterface
         }
 
         // Si hay múltiples mensajes de sistema, concatenarlos
-        $systemPrompt = !empty($systemPrompts)
+        $systemPromptText = !empty($systemPrompts)
             ? implode("\n\n", $systemPrompts)
             : null;
+
+        $systemPrompt = null;
+        if ($systemPromptText !== null) {
+            $systemPrompt = [
+                [
+                    'type' => 'text',
+                    'text' => $systemPromptText,
+                    'cache_control' => ['type' => 'ephemeral']
+                ]
+            ];
+        }
 
         // Validar que el primer mensaje no sea del asistente
         if (!empty($filteredMessages) && ($filteredMessages[0]['role'] ?? '') === 'assistant') {

@@ -19,6 +19,7 @@ use AiSdk\Providers\GeminiProvider;
 use AiSdk\Providers\OllamaProvider;
 use AiSdk\Providers\OpenAIProvider;
 use AiSdk\Providers\OpenRouterProvider;
+use AiSdk\Providers\NvidiaProvider;
 
 ?>
 <!DOCTYPE html>
@@ -101,6 +102,10 @@ $config = [
         'base_url' => 'http://localhost:11434', //http://172.17.0.1:11434
         'api_key'  => null,
     ],
+    'nvidia' => [
+        'api_key' => '',
+        'model'   => 'meta/llama-3.1-70b-instruct',
+    ],
 ];
 
 $providers = [];
@@ -127,6 +132,14 @@ $providers[] = [
     'provider' => new OllamaProvider($config['ollama']['model'], $config['ollama']['base_url']),
     'hasKey'   => true,
     'isOllama' => true,
+];
+
+// Nvidia
+$providers[] = [
+    'name'     => 'Nvidia (' . $config['nvidia']['model'] . ')',
+    'provider' => hasApiKey($config['nvidia']['api_key']) ? new NvidiaProvider($config['nvidia']['api_key'], $config['nvidia']['model']) : null,
+    'hasKey'   => hasApiKey($config['nvidia']['api_key']),
+    'isOllama' => false,
 ];
 
 // ══════════════════════════════════════════════════════════════

@@ -80,6 +80,11 @@ final class GeminiProvider implements AIProviderInterface
     private int $maxOutputTokens;
 
     /**
+     * @var string|null Nombre del recurso de caché activo (ej: cachedContents/1234).
+     */
+    private ?string $cacheName = null;
+
+    /**
      * Constructor del GeminiProvider.
      *
      * @param string          $apiKey          API Key de Google AI Studio. Obtener en: https://aistudio.google.com
@@ -159,7 +164,11 @@ final class GeminiProvider implements AIProviderInterface
         ];
 
         // Gemini maneja el system prompt de forma separada
-        if ($systemInstruction !== null) {
+        if ($this->cacheName !== null) {
+            // Si usamos caché, pasamos el ID y omitimos el systemInstruction 
+            // ya que el contexto (esquema) ya está en la caché.
+            $body['cachedContent'] = $this->cacheName;
+        } elseif ($systemInstruction !== null) {
             $body['systemInstruction'] = [
                 'parts' => [['text' => $systemInstruction]],
             ];
@@ -202,6 +211,54 @@ final class GeminiProvider implements AIProviderInterface
         }
 
         $this->model = trim($model);
+    }
+
+    /**
+     * Establece manualmente un nombre de caché existente para ser usado en el chat.
+     *
+     * @param string|null $cacheName Nombre del recurso (ej: "cachedContents/xyz123").
+     */
+    public function setCacheName(?string $cacheName): self
+    {
+        $this->cacheName = $cacheName;
+        return $this;
+    }
+
+    /**
+     * Crea un nuevo contexto en caché en la API de Gemini usando una instrucción de sistema.
+     * Útil para esquemas de base de datos grandes que se usarán varias veces.
+     *
+     * @param string $systemInstruction Texto a cachear (ej: esquema de BD).
+     * @param int    $ttlMinutes        Tiempo de vida en minutos (por defecto 60).
+     *
+     * @return string El ID del caché generado (ej: "cachedContents/xyz123").
+     *
+     * @throws RuntimeException Si falla la creación en la API.
+     */
+    public function createContextCache(string $systemInstruction, int $ttlMinutes = 60): string
+    {
+        $url = "https://generativelanguage.googleapis.com/v1beta/cachedContents?key={$this->apiKey}";
+        
+        // TTL format in seconds: "3600s"
+        $ttlSeconds = $ttlMinutes * 60;
+        
+        $body = [
+            // El modelo base debe especificarse en el formato models/nombre
+            'model' => str_starts_with($this->model, 'models/') ? $this->model : "models/{$this->model}",
+            'systemInstruction' => [
+                'parts' => [['text' => $systemInstruction]],
+            ],
+            'ttl' => "{$ttlSeconds}s",
+        ];
+
+        $response = $this->httpClient->post($url, [], $body);
+
+        if (!isset($response['name'])) {
+            throw new RuntimeException("GeminiProvider: Error al crear la caché de contexto. Respuesta: " . json_encode($response));
+        }
+
+        $this->cacheName = $response['name'];
+        return $this->cacheName;
     }
 
     /**

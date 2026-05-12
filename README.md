@@ -32,15 +32,16 @@
 APIs de inteligencia artificial desde PHP puro, sin necesidad de Composer ni librerías externas.
 
 Implementa el **Strategy Pattern** para que el código cliente sea completamente agnóstico
-al proveedor de IA, permitiendo cambiar entre OpenAI, Gemini, Claude, OpenRouter y Ollama
+al proveedor de IA, permitiendo cambiar entre OpenAI, Gemini, Claude, OpenRouter, Ollama y Nvidia
 con una sola línea de código.
 
 ---
 
 ## Características
 
-- ✅ **5 proveedores soportados**: OpenAI, Gemini, Claude, OpenRouter, Ollama
+- ✅ **6 proveedores soportados**: OpenAI, Gemini, Claude, OpenRouter, Ollama, Nvidia
 - ✅ **8 modos preconfigurados**: procesamiento de texto, comunicación, soporte, SQL y más
+- ✅ **Optimización de Costos**: Soporte nativo para *Prompt Caching* en Claude y Context Caching en Gemini
 - ✅ **Identidad Personalizable**: Define nombre y tono para tu asistente
 - ✅ **Sin dependencias**: Solo PHP 8+ y extensión cURL (estándar)
 - ✅ **Tipado fuerte**: `declare(strict_types=1)` en todos los archivos
@@ -98,7 +99,11 @@ ai-sdk/
 │
 ├── ejemplos/                         # Archivos de ejemplo
 │   ├── example.php                   # Ejemplo completo ejecutable
-│   └── quickstart.php                # Código inicial rápido
+│   ├── quickstart.php                # Código inicial rápido
+│   └── app_queries/                  # App Full-stack de Generación SQL
+│       ├── api.php                   # Backend PHP
+│       ├── index.html                # Frontend con Historial
+│       └── index_cache.html          # Frontend Stateless (Ahorro tokens)
 │
 └── src/
     ├── AIClient.php                  # Facade principal
@@ -117,7 +122,8 @@ ai-sdk/
         ├── GeminiProvider.php
         ├── ClaudeProvider.php
         ├── OpenRouterProvider.php
-        └── OllamaProvider.php
+        ├── OllamaProvider.php
+        └── NvidiaProvider.php
 ```
 
 ---
@@ -152,6 +158,19 @@ echo $client->generateTable($data, 'Catálogo');
 ---
 
 ## Proveedores
+
+### Nvidia
+
+```php
+use AiSdk\Providers\NvidiaProvider;
+
+$provider = new NvidiaProvider(
+    apiKey:      'nvapi-...', // https://build.nvidia.com/
+    model:       'meta/llama-3.1-70b-instruct', // Modelo alojado en Nvidia NIM
+    temperature: 0.7,
+    maxTokens:   4096
+);
+```
 
 ### OpenAI
 
@@ -290,37 +309,38 @@ $client->setTone('amigable y servicial');
 
 ### Modo 2: `generador_queries`
 
-Convierte lenguaje natural en SQL válido y optimizado. Este modo ofrece dos estrategias para cargar el esquema de tu base de datos dependiendo de tus necesidades:
+Convierte lenguaje natural en SQL válido y optimizado. Ofrece múltiples estrategias para gestionar el contexto y optimizar el consumo de tokens:
 
-#### Estrategia 1: Carga Única mediante Sesiones (Recomendado)
-Para múltiples consultas sobre la misma base de datos, utiliza `startQuerySession`. El esquema se envía al proveedor de IA **solo una vez** al iniciar la sesión. Las siguientes consultas solo enviarán la pregunta en lenguaje natural, lo que ahorra una cantidad significativa de tokens y mejora los tiempos de respuesta.
+#### Estrategia 1: Carga Única mediante Sesiones (Recomendado para chats interactivos)
+El esquema se envía al proveedor **solo una vez** al iniciar la sesión. El historial de la conversación se mantiene, permitiendo a la IA recordar el esquema y hacer preguntas de seguimiento. *Nota: El consumo de tokens de entrada crecerá con cada pregunta del historial.*
 
 ```php
-$schema = <<<SQL
-CREATE TABLE users (id INT, name VARCHAR(100), status VARCHAR(20));
-CREATE TABLE orders (id INT, user_id INT, total DECIMAL, created_at DATETIME);
-SQL;
-
-// El esquema se carga SOLO UNA VEZ al iniciar la sesión
 $session = $client->startQuerySession($schema);
-
-// Consulta 1 (Envía esquema + pregunta)
 $sql1 = $session->query('Top 10 usuarios por gasto total en 2024');
-
-// Consultas 2 a 5 (SOLO envían la pregunta, sin gastar tokens extra en el esquema)
-$sql2 = $session->query('Muestra solo los usuarios que tienen el status inactivo');
-$sql3 = $session->query('¿Cuál es el promedio de gasto de esos usuarios inactivos?');
-$sql4 = $session->query('Lista los pedidos del último mes de esos mismos usuarios');
-$sql5 = $session->query('Agrupa esos pedidos por día y suma el total');
+$sql2 = $session->query('Muestra solo los usuarios que tienen el status inactivo'); // Sabe de qué usuarios hablas
 ```
 
-#### Estrategia 2: Carga en cada petición (Consulta Puntual)
-Para una única consulta rápida, puedes usar `generateQuery`. En este caso, **el esquema se debe enviar siempre** en cada llamada, ya que no hay persistencia de sesión.
+#### Estrategia 2: Consultas Aisladas (Ahorro de tokens)
+El esquema se debe enviar **siempre** en cada llamada junto a la nueva pregunta, sin acumular historial. Ideal si tus preguntas no tienen relación entre sí. Se recomienda **minificar el esquema** para ahorrar más tokens.
 
 ```php
-// El esquema se envía completo en esta petición
+// Esquema minificado:
+$schema = "usuarios(id, nombre, email); pedidos(id, usuario_id, total)";
 $sql = $client->generateQuery($schema, 'Productos que nunca han sido vendidos');
 ```
+
+#### Estrategia 3: Prompt Caching (Para esquemas gigantes)
+El SDK soporta de forma nativa caché de contexto para abaratar los costos de sistemas muy grandes:
+- **Claude:** Funciona de manera 100% automática y transparente al usar el `ClaudeProvider`.
+- **Gemini:** Permite subir un esquema manualmente mediante su API de contexto:
+```php
+// Solo en GeminiProvider
+$cacheId = $provider->createContextCache($esquemaEnorme, ttlMinutes: 60);
+$provider->setCacheName($cacheId);
+// A partir de aquí, las consultas de generateQuery son baratísimas
+```
+
+
 
 **El SQL generado:**
 - **Es seguro por diseño:** Solo genera consultas `SELECT` de solo lectura. Rechaza cualquier intento de modificar datos (`DELETE`, `DROP`, `UPDATE`, etc).

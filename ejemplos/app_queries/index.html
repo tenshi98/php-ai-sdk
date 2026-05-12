@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="es" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Generador SQL Estructurado - Frontend</title>
+    <!-- Usando Pico CSS para diseño minimalista y elegante -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <style>
+        .chat-container { 
+            height: 450px; 
+            overflow-y: auto; 
+            border: 1px solid #333; 
+            padding: 1.5rem; 
+            margin-bottom: 1.5rem; 
+            border-radius: 8px; 
+            background: #111; 
+        }
+        .msg { 
+            margin-bottom: 1rem; 
+            padding: 1rem; 
+            border-radius: 8px; 
+            clear: both;
+            line-height: 1.5;
+        }
+        .msg.user { 
+            background: #01768a; 
+            color: white; 
+            float: right; 
+            max-width: 80%; 
+        }
+        .msg.bot { 
+            background: #222; 
+            color: #ddd; 
+            float: left; 
+            max-width: 80%; 
+            border: 1px solid #444; 
+        }
+        .json-block { 
+            background: #000; 
+            padding: 1rem; 
+            border-radius: 5px; 
+            overflow-x: auto; 
+            font-family: monospace; 
+            font-size: 0.9rem;
+            margin-top: 0.5rem;
+            color: #4af626; /* Color terminal para el SQL/JSON */
+        }
+        .clearfix::after { 
+            content: ""; 
+            display: table; 
+            clear: both; 
+        }
+    </style>
+</head>
+<body>
+    <main class="container">
+        <header style="margin-bottom: 2rem;">
+            <h2>🛠️ Generador de Queries SQL</h2>
+            <p>Ejemplo de separación Frontend (HTML/JS) y Backend (PHP) usando el SDK.</p>
+        </header>
+
+        <div class="grid">
+            <!-- Columna Izquierda: Esquema y Controles -->
+            <div>
+                <h4>1. Esquema de Base de Datos</h4>
+                <p><small>Este esquema se enviará solo en la primera consulta. Luego, la sesión mantendrá el contexto en memoria.</small></p>
+                <textarea id="schema-input" rows="12" style="font-family: monospace;" placeholder="CREATE TABLE..."></textarea>
+                
+                <button id="reset-btn" class="secondary outline" style="margin-top: 1rem;">🔄 Reiniciar Sesión</button>
+            </div>
+
+            <!-- Columna Derecha: Chat y Resultados -->
+            <div>
+                <h4>2. Conversación con la IA</h4>
+                
+                <div id="chat-box" class="chat-container clearfix">
+                    <div class="msg bot">
+                        <strong>Sistema:</strong><br>
+                        ¡Hola! Escribe tu pregunta sobre el esquema en lenguaje natural para que genere la consulta SQL.
+                    </div>
+                </div>
+                
+                <form id="chat-form">
+                    <fieldset role="group">
+                        <input type="text" id="query-input" placeholder="Ej: Dame la lista de usuarios y correos..." required autocomplete="off">
+                        <button type="submit" id="submit-btn" aria-busy="false">Generar SQL</button>
+                    </fieldset>
+                </form>
+            </div>
+        </div>
+    </main>
+
+    <script>
+        // ESTADO DE LA APLICACIÓN
+        // Almacenaremos el historial en el frontend para crear una API backend sin estado (stateless)
+        let conversationHistory = [];
+
+        // REFERENCIAS DOM
+        const chatBox = document.getElementById('chat-box');
+        const chatForm = document.getElementById('chat-form');
+        const queryInput = document.getElementById('query-input');
+        const schemaInput = document.getElementById('schema-input');
+        const submitBtn = document.getElementById('submit-btn');
+        const resetBtn = document.getElementById('reset-btn');
+
+        // VALOR POR DEFECTO DEL ESQUEMA
+        const defaultSchema = `CREATE TABLE usuarios (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    nombre VARCHAR(100),
+    email VARCHAR(100),
+    fecha_registro DATE
+);
+CREATE TABLE pedidos (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    usuario_id INT,
+    total DECIMAL(10,2),
+    fecha_pedido DATE,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id)
+);`;
+        schemaInput.value = defaultSchema;
+
+        // FUNCIÓN: Añadir mensaje al chat UI
+        function appendMessage(role, text, json = null) {
+            const div = document.createElement('div');
+            div.className = `msg ${role} clearfix`;
+            
+            let content = `<strong>${role === 'user' ? 'Tú' : 'IA'}:</strong><br>${text}`;
+            
+            if (json) {
+                // Formateamos el JSON extraído (en el modo SQL, la respuesta viene estructurada)
+                let jsonStr = typeof json === 'string' ? json : JSON.stringify(json, null, 2);
+                content += `<pre class="json-block">${jsonStr}</pre>`;
+            }
+            
+            div.innerHTML = content;
+            chatBox.appendChild(div);
+            // Auto scroll hacia abajo
+            chatBox.scrollTop = chatBox.scrollHeight;
+        }
+
+        // EVENTO: Reiniciar Sesión
+        resetBtn.addEventListener('click', () => {
+            conversationHistory = [];
+            chatBox.innerHTML = `
+                <div class="msg bot clearfix">
+                    <strong>Sistema:</strong><br>
+                    Sesión reiniciada. Se ha borrado el historial. ¡Escribe una nueva pregunta!
+                </div>`;
+            schemaInput.disabled = false; // Permitir editar esquema de nuevo
+        });
+
+        // EVENTO: Enviar Formulario
+        chatForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const query = queryInput.value.trim();
+            if (!query) return;
+
+            // Mostrar el mensaje del usuario
+            appendMessage('user', query);
+            queryInput.value = '';
+            
+            // Estado de carga UI
+            submitBtn.setAttribute('aria-busy', 'true');
+            submitBtn.disabled = true;
+
+            // Determinar si es una pregunta de seguimiento
+            const isFollowUp = conversationHistory.length > 0;
+            
+            // Construir el cuerpo de la petición (payload)
+            const payload = {
+                pregunta: query,
+                historial: conversationHistory
+            };
+
+            // Si es la primera consulta, enviamos también el esquema
+            if (!isFollowUp) {
+                payload.esquema = schemaInput.value.trim();
+                // Bloqueamos el textarea para indicar que el esquema está fijado
+                schemaInput.disabled = true; 
+            }
+
+            try {
+                // Llamar al backend PHP
+                const response = await fetch('api.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                const result = await response.json();
+
+                if (response.ok && result.success) {
+                    appendMessage('bot', 'Aquí tienes la estructura generada:', result.data);
+                    
+                    // Actualizar el historial local con la nueva interacción devuelta por el backend
+                    if (result.nuevo_historial) {
+                        conversationHistory = conversationHistory.concat(result.nuevo_historial);
+                    }
+                } else {
+                    appendMessage('bot', `❌ Error: ${result.error || 'Respuesta inválida del servidor'}`);
+                    if (!isFollowUp) schemaInput.disabled = false;
+                }
+            } catch (error) {
+                appendMessage('bot', `❌ Error de conexión: ${error.message}`);
+                if (!isFollowUp) schemaInput.disabled = false;
+            } finally {
+                // Restaurar estado UI
+                submitBtn.setAttribute('aria-busy', 'false');
+                submitBtn.disabled = false;
+                queryInput.focus();
+            }
+        });
+    </script>
+</body>
+</html>
